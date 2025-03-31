@@ -60,6 +60,8 @@ def split_markdown_into_blocks(lines,skip_empty_line=True):
         "yaml_start": r"^---\s*$",  # 匹配YAML头开始 ---
         "yaml_end": r"^---\s*$",  # 匹配YAML头结束 ---
         "table": r"^<table>.*</table>$",  # 匹配单行表格 <table>...</table>
+        "markdown_table_row": r"^\s*\|.*\|\s*$",  # 匹配Markdown表格行
+        "markdown_table_separator": r"^\s*\|[\s\-\|:]*\|\s*$",  # 匹配表格分隔符行
     }
 
     blocks = []
@@ -67,9 +69,11 @@ def split_markdown_into_blocks(lines,skip_empty_line=True):
     in_code_block = False
     in_formula_block = False
     in_yaml_block = False
+    in_markdown_table = False
     current_code_block = []
     current_formula_block = []
     current_yaml_block = []
+    current_markdown_table = []
 
     for line in lines:
         # 处理代码块
@@ -102,6 +106,19 @@ def split_markdown_into_blocks(lines,skip_empty_line=True):
                 current_yaml_block = []
             continue
 
+        # 处理Markdown表格
+        if in_markdown_table:
+            if re.match(patterns["markdown_table_row"], line) or re.match(patterns["markdown_table_separator"], line):
+                current_markdown_table.append(line)
+                continue
+            else:
+                # 表格结束
+                if current_markdown_table:
+                    blocks.append(("markdown_table", "".join(current_markdown_table)))
+                    in_markdown_table = False
+                    current_markdown_table = []
+                # 不要continue，因为当前行需要继续处理
+
         # 匹配代码块开始
         if re.match(patterns["code_block_start"], line):
             in_code_block = True
@@ -118,6 +135,12 @@ def split_markdown_into_blocks(lines,skip_empty_line=True):
         if re.match(patterns["yaml_start"], line):
             in_yaml_block = True
             current_yaml_block.append(line)
+            continue
+
+        # 匹配Markdown表格
+        if re.match(patterns["markdown_table_row"], line) and not in_markdown_table:
+            in_markdown_table = True
+            current_markdown_table.append(line)
             continue
 
         # 匹配标题
@@ -154,6 +177,10 @@ def split_markdown_into_blocks(lines,skip_empty_line=True):
         # 匹配段落
         else:
             blocks.append(("paragraph", line))
+
+    # 处理文件末尾可能的未闭合表格
+    if in_markdown_table and current_markdown_table:
+        blocks.append(("markdown_table", "".join(current_markdown_table)))
 
     return blocks
 
@@ -312,6 +339,25 @@ def select_md_files():
         filetypes=[("Markdown files", "*.md")]
     )
     return list(md_paths)  # 将返回的tuple转换为list
+
+def select_md_or_pdf_files():
+    """
+    选择一个或多个Markdown或PDF文件
+    返回文件路径列表
+    """
+    root = tk.Tk()
+    root.withdraw()  # 隐藏主窗口
+
+    file_paths = filedialog.askopenfilenames(
+        title="选择Markdown或PDF文件",
+        filetypes=[("Markdown/PDF文件", "*.md *.pdf"), ("Markdown文件", "*.md"), ("PDF文件", "*.pdf"), ("所有文件", "*.*")]
+    )
+
+    if not file_paths:
+        print("未选择任何文件")
+        return []
+
+    return list(file_paths)
 
 def get_markdown_titles(md_file_path):
     with open(md_file_path, 'r', encoding='utf-8') as file:
