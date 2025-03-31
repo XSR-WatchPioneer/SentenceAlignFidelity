@@ -6,8 +6,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from LLM_API import *
-from utils import split_markdown_into_blocks, merge_by_top_section, count_words, clean_filename, select_md_files, \
-    select_md_or_pdf_files
+from utils import split_markdown_into_blocks, merge_by_top_section, count_words, clean_filename, select_md_files, select_md_or_pdf_files
 from Autoadjust_title import arrange_titles
 from Mistral_OCR import process_pdf, Mistral_OCR_API
 
@@ -81,9 +80,8 @@ def recover_paragraph(translated_file_path, original_blocks):
 
 
 def translate_references(section, block_file, model: LLM_model = gpt_4o_mini_AzureOpenAI, max_translation=1000):
-    # todo 若原文的参考文献断行有异常，则无法使用
+    #todo 若原文的参考文献断行有异常，则无法使用
     """专门处理参考文献章节，分批翻译并验证结果"""
-
     def translate_batch(text_batch):
         """处理单批次翻译"""
         system_prompt = """你是专业的参考文献翻译器。请将英文参考文献条目翻译成中文。
@@ -235,6 +233,7 @@ def TranslateProcess(section, idx, file_dir, max_translation=1000, model: LLM_mo
                 f.write(block[1] + '\n')
         return block_file
 
+
     # 初始化对话历史
     # todo 保持对话历史不超过5轮
     conversation_history = [
@@ -297,7 +296,7 @@ They ignore the complex structure of a trace brought by its invocation hierarchy
 
             # 直接写入非paragraph内容
             with open(block_file, 'a', encoding='utf-8') as f:
-                f.write('\n' + block_content + '\n')
+                f.write('\n' + block_content + '\n\n')
             continue
 
         # 处理paragraph类型
@@ -477,7 +476,7 @@ def process_markdown_translation(md_file_path, max_translation=1000, max_concurr
 
     '''合并翻译结果'''
     base_name = os.path.splitext(os.path.basename(md_file_path))[0]
-    # 调整文件名
+    #调整文件名
     if '_EN_' in base_name:
         base_name = base_name.replace('_EN_', '_CH_')
     output_file = os.path.join(file_dir, f"{base_name}_逐句对照.md")
@@ -559,7 +558,7 @@ if __name__ == "__main__":
     for i, file_path in enumerate(files):
         print(f"\n[{i + 1}/{total_files}] 开始处理文件: {os.path.basename(file_path)}")
         start_time = time.time()
-
+        
         # 检查文件类型
         if file_path.lower().endswith('.pdf'):
             print(f"检测到PDF文件，正在使用Mistral OCR进行文本提取...")
@@ -569,19 +568,18 @@ if __name__ == "__main__":
                 md_file_path = Path(file_path).with_suffix('.md')
                 if md_file_path.exists():
                     print(f"PDF转Markdown成功，开始翻译处理...")
-                    process_markdown_translation(str(md_file_path), max_translation=800, max_concurrent=3,
-                                                 model=glm_4_flash)
+                    process_markdown_translation(str(md_file_path), max_translation=800, max_concurrent=1, model=gemini_2_flash)
                 else:
                     print(f"PDF转Markdown失败，未找到生成的Markdown文件")
             except Exception as e:
                 print(f"PDF处理出错: {str(e)}")
         elif file_path.lower().endswith('.md'):
             # 直接处理Markdown文件
-            process_markdown_translation(file_path, max_translation=800, max_concurrent=3, model=glm_4_flash)
+            process_markdown_translation(file_path, max_translation=800, max_concurrent=1, model=gemini_2_flash)
         else:
             print(f"不支持的文件类型: {file_path}")
             continue
-
+            
         elapsed_time = time.time() - start_time
         print(f"[{i + 1}/{total_files}] 文件处理完成: {os.path.basename(file_path)}")
         print(f"处理耗时: {elapsed_time:.2f}秒 ({elapsed_time / 60:.2f}分钟)")
