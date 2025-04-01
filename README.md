@@ -14,11 +14,13 @@ SentenceAlignFidelity 能够一键将 PDF 论文翻译为逐句对照的 Markdow
 
 这是原本的 PDF 论文
 
-![[assets/论文一键翻译ReadMe.assets/file-20250401151117553.png]]
+![](assets/论文一键翻译ReadMe.assets/file-20250401151117553.png)
+
 
 运行本程序，可以**一键翻译**为：**逐句对照、完美兼容公式和图表、高质量、可编辑翻译的 Markdown 文本**
 
-![[assets/论文一键翻译ReadMe.assets/file-20250401152133623.png]]
+![](assets/论文一键翻译ReadMe.assets/file-20250401152133623.png)
+
 
 # 快速入门
 
@@ -74,7 +76,7 @@ pip install marker
 
 如果你没有大模型的 API，大部分大模型注册时都会赠送很多使用额度
 参考沉浸式翻译提供的帮助文档，获取你心仪的大模型 API Key：[翻译服务 API 申请 | 沉浸式翻译](https://immersivetranslate.com/zh-Hans/docs/services/)
-![[assets/论文一键翻译ReadMe.assets/file-20250401101902431.png]]
+![](assets/论文一键翻译ReadMe.assets/file-20250401101902431.png)
 
 本项目支持所有与 OpenAI curl 兼容的大模型 API，已知兼容的大模型如下
 
@@ -121,14 +123,13 @@ pip install mistralai
 
 在所有章节翻译完成后，程序将合并子章节的内容至最终输出文件中，名为`论文名_逐句对照`
 
-> [!info]
-> 关于异常断行
+>关于异常断行
 
 PDF 转 Markdown 的结果不总是完美的，由于分页和图表等原因，论文的某些段落可能会被分开，而这难以被正确处理，导致转换后的 Markdown 中段落不连续，我将其称之为异常断行
 
 例如下图中，两个绿框的内容其实属于同一段落，但由于分页和图表排版，他们被强行分开了
 
-![[assets/论文一键翻译ReadMe.assets/file-20250401150642725.png]]
+![](assets/论文一键翻译ReadMe.assets/file-20250401150642725.png)
 
 翻译以段落为基本单位，这或多或少会影响准确性（实测影响很小）
 
