@@ -74,8 +74,11 @@ pip install marker
 
 ## Step2 准备大模型的 API Key
 
+**使用的大模型越智能，翻译效果越好，格式越规整**
+
 如果你没有大模型的 API，大部分大模型注册时都会赠送很多使用额度
 参考沉浸式翻译提供的帮助文档，获取你心仪的大模型 API Key：[翻译服务 API 申请 | 沉浸式翻译](https://immersivetranslate.com/zh-Hans/docs/services/)
+
 ![](assets/论文一键翻译ReadMe.assets/file-20250401101902431.png)
 
 本项目支持所有与 OpenAI curl 兼容的大模型 API，已知兼容的大模型如下
@@ -98,7 +101,8 @@ pip install marker
 pip install mistralai
 ```
 
-请在`LLM_API`中填入 API key，包括用于解析
+
+请在`LLM_API.py`中填入 API key，包括用于将PDF解析为Markdown的 Mistral OCR 的 API Key 和用于翻译的 LLM 的 API Key
 
 > [!warning]
 > 若不填入 Mistral OCR 的 API Key，则无法对 PDF 进行直接翻译，只能翻译 Markdown 文件
