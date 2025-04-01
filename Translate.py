@@ -11,7 +11,7 @@ from utils import split_markdown_into_blocks, merge_by_top_section, count_words,
 from Autoadjust_title import arrange_titles
 from Mistral_OCR import pdf2markdown
 from LLM_API import ChooseLLM, Mistral_OCR_API
-
+# from LLM_API_test import gemini_2_flash
 
 def recover_paragraph(translated_file_path, original_blocks):
     """
@@ -93,7 +93,7 @@ def translate_references(section, block_file, model: LLM_model, max_translation=
         - 保持原有的引用编号格式
         - 直接输出译文，不要有任何解释"""
 
-        result = LLM_Stream_Response(
+        translated_text, token_usage = LLM_Stream_Response(
             model=model,
             system_prompt=system_prompt,
             prompt=f"翻译以下参考文献：\n{text_batch}",
@@ -102,11 +102,10 @@ def translate_references(section, block_file, model: LLM_model, max_translation=
             max_tokens=4095
         )
 
-        if result is None:
+        if translated_text is None:
             print("批次翻译出错")
             return None
         else:
-            translated_text, token_usage = result
             return translated_text
 
     def validate_translation(translated_blocks, original_blocks):
@@ -258,7 +257,7 @@ They ignore the complex structure of a trace brought by its invocation hierarchy
         conversation_history.append({"role": "user", "content": f"{text_to_translate}"})
 
         # 调用新的LLM_Stream_Response函数
-        result = LLM_Stream_Response(
+        translated_content, token_usage = LLM_Stream_Response(
             model=model,
             messages=conversation_history,
             write_file=block_file,
@@ -267,7 +266,7 @@ They ignore the complex structure of a trace brought by its invocation hierarchy
         )
 
         # 处理响应
-        if result is None:
+        if translated_content is None:
             # 所有重试都失败，写入原文
             with open(block_file, 'a', encoding='utf-8') as f:
                 f.write(text_to_translate)
@@ -276,7 +275,6 @@ They ignore the complex structure of a trace brought by its invocation hierarchy
             conversation_history.pop()
             return
         # 解析翻译结果
-        translated_content, token_usage = result
 
         # 记录assistant的完整回复，用于下一次对话
         conversation_history.append({"role": "assistant", "content": translated_content})
@@ -360,18 +358,16 @@ def translate_titles(title_blocks, model: LLM_model):
     for attempt in range(max_retries):
         try:
             # 使用新的LLM_Stream_Response函数
-            result = LLM_Stream_Response(
+            translated_text,token_usage = LLM_Stream_Response(
                 model=model,
                 system_prompt=system_prompt,
                 prompt=f"翻译以下Markdown标题：\n{title_text}",
                 temperature=0.3
             )
 
-            if result is None:
+            if translated_text is None:
                 print(f"第{attempt + 1}次翻译标题失败，准备重试...")
                 continue
-
-            translated_text, _ = result
 
             # 解析翻译后的标题
             translated_titles = []
@@ -575,7 +571,7 @@ if __name__ == "__main__":
             if not Mistral_OCR_API:
                 print("Mistral OCR API密钥未设置，将无法翻译PDF文件，请检查配置。")
                 continue
-            print(f"检测到PDF文件，正在使用Mistral OCR进行文本提取...")
+            print(f"检测到PDF文件，正在使用Mistral OCR将其转换为Markdown...")
             try:
                 pdf2markdown(file_path, Mistral_OCR_API)
                 # 获取生成的Markdown文件路径

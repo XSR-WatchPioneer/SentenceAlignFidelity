@@ -235,7 +235,7 @@ def LLM_Stream_Response(
         write_file = None,
         max_tokens = 4096,max_retry: int = 3,timeout = 10,
         temperature: float = 0.7
-) -> tuple[str | Any, Any] | None:
+) -> tuple[str | Any, Any] :
     """
     # todo 有些模型不返回token统计信息，如Azure、GitHubModels
     流式调用LLM API并返回结果
@@ -334,4 +334,4 @@ def LLM_Stream_Response(
             if retry_count < max_retry:
                 # 指数退避重试
                 time.sleep(2 ** retry_count)
-    return None
+    return None,None

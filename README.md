@@ -30,7 +30,7 @@ SentenceAlignFidelity 能够一键将 PDF 论文翻译为逐句对照的 Markdow
 
 选择以下任意以一种方法，将你的 PDF 论文转为 Markdown 格式
 
-### 使用 Mistral OCR 模型（推荐，免费，本项目已集成）
+### 使用 Mistral OCR 大模型（推荐，免费，本项目已集成）
 
 > 参考文档：[免费使用 Mistral AI 并将其添加到 Dify 中使用 - 53AI-AI 知识库|大模型知识库|大模型训练|智能体开发](https://www.53ai.com/news/dify/2024102787312.html)
 
@@ -52,7 +52,7 @@ SentenceAlignFidelity 能够一键将 PDF 论文翻译为逐句对照的 Markdow
 
 注意！注意！注意！创建好的 key 需要粘贴复制下来，保存在本地，因为关闭之后就不会再进行展示了！
 
-有了 API Key 之后我们就可以进行使用了
+本项目已集成了Mistral OCR，将API key填入`LLM_API.py`的`Mistral_OCR_API`中，即可自动启用PDF转Markdown功能
 
 ### 使用 Doc2x（推荐，效果好，签到可得额度）
 
