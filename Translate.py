@@ -1,11 +1,16 @@
 import os
 import random
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from difflib import SequenceMatcher
+from pathlib import Path
 
 from LLM_API import *
-from utils import split_markdown_into_blocks, merge_by_top_section, count_words, clean_filename, select_md_files
+from LLM_tools import LLM_Stream_Response
+from utils import split_markdown_into_blocks, merge_by_top_section, count_words, clean_filename, select_md_or_pdf_files
 from Autoadjust_title import arrange_titles
+from Mistral_OCR import pdf2markdown
+from LLM_API import ChooseLLM, Mistral_OCR_API
 
 
 def recover_paragraph(translated_file_path, original_blocks):
@@ -76,56 +81,33 @@ def recover_paragraph(translated_file_path, original_blocks):
     return translated_file_path
 
 
-def translate_references(section, block_file, model: LLM_model = gpt_4o_mini_AzureOpenAI, max_translation=1000):
+def translate_references(section, block_file, model: LLM_model, max_translation=1000):
+    # todo 若原文的参考文献断行有异常，则无法使用
     """专门处理参考文献章节，分批翻译并验证结果"""
-    headers = {
-        "Authorization": f"Bearer {model.api_key}",
-        "Content-Type": "application/json",
-        "api-key": model.api_key,
-    }
 
     def translate_batch(text_batch):
         """处理单批次翻译"""
-        data = {
-            "model": model.model_name,
-            "messages": [
-                {"role": "system", "content": """你是专业的参考文献翻译器。请将英文参考文献条目翻译成中文。
-                注意：
-                - 保持原有格式，包括换行、缩进和标点
-                - 保持原有的引用编号格式
-                - 直接输出译文，不要有任何解释"""},
-                {"role": "user", "content": f"翻译以下参考文献：\n{text_batch}"}
-            ],
-            "stream": True,
-            "max_tokens": 4095,
-        }
+        system_prompt = """你是专业的参考文献翻译器。请将英文参考文献条目翻译成中文。
+        注意：
+        - 保持原有格式，包括换行、缩进和标点
+        - 保持原有的引用编号格式
+        - 直接输出译文，不要有任何解释"""
 
-        translated_content = ""
-        try:
-            with requests.post(model.post_url, headers=headers, json=data, stream=True, timeout=30) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if line:
-                        decoded_line = line.decode('utf-8')
-                        if decoded_line.startswith("data: "):
-                            decoded_line = decoded_line[len("data: "):]
-                            if decoded_line == "[DONE]":
-                                break
-                            try:
-                                json_data = json.loads(decoded_line)
-                                if json_data.get('choices'):
-                                    delta = json_data['choices'][0]['delta']
-                                    if 'content' in delta:
-                                        content = delta['content']
-                                        translated_content += content
-                                        with open(block_file, 'a', encoding='utf-8') as f:
-                                            f.write(content)
-                            except json.JSONDecodeError:
-                                continue
-            return translated_content
-        except Exception as e:
-            print(f"批次翻译出错: {str(e)}")
+        result = LLM_Stream_Response(
+            model=model,
+            system_prompt=system_prompt,
+            prompt=f"翻译以下参考文献：\n{text_batch}",
+            write_file=block_file,
+            timeout=10,
+            max_tokens=4095
+        )
+
+        if result is None:
+            print("批次翻译出错")
             return None
+        else:
+            translated_text, token_usage = result
+            return translated_text
 
     def validate_translation(translated_blocks, original_blocks):
         """验证翻译结果"""
@@ -142,10 +124,9 @@ def translate_references(section, block_file, model: LLM_model = gpt_4o_mini_Azu
     max_retries = 3
     current_text = ""
     current_words = 0
-    translated_blocks = []
     batch_contents = []
 
-    # 收集要翻译的内容
+    # 将翻译的内容分批
     for block in section:
         block_type, block_content = block
         current_text += block_content + '\n'
@@ -200,7 +181,7 @@ def translate_references(section, block_file, model: LLM_model = gpt_4o_mini_Azu
     return block_file
 
 
-def TranslateProcess(section, idx, file_dir, max_translation=1000, model: LLM_model = glm_4_plus):
+def TranslateProcess(section, idx, file_dir, model: LLM_model, max_translation=1000, md_file_name=""):
     """
     处理单个块的翻译过程，并将结果写入文件
     Args:
@@ -209,11 +190,12 @@ def TranslateProcess(section, idx, file_dir, max_translation=1000, model: LLM_mo
         file_dir: 输出目录
         max_translation: 最大翻译字数
         model: LLM模型
+        md_file_name: 原始Markdown文件名（不含扩展名）
     Returns:
         str: 生成的块文件路径
     """
-    SYS_PROMPT = """你是专业从事学术论文翻译的高技能翻译引擎。你的职责是将学术文本翻译成中文，确保复杂概念和专业术语的准确翻译，而不改变原有的学术语气或添加解释。
-
+    SYS_PROMPT = """
+你是专业从事学术论文翻译的高技能翻译引擎。你的职责是将学术文本翻译成中文，确保复杂概念和专业术语的准确翻译，而不改变原有的学术语气或添加解释。
 注意:
 - 保持和原文格式一致。
 - 不要擅自合并或拆分段落。
@@ -234,8 +216,9 @@ def TranslateProcess(section, idx, file_dir, max_translation=1000, model: LLM_mo
     safe_title = clean_filename(title_text)[:30]
 
     # 创建块文件
-    block_file = os.path.join(file_dir, f"block_{idx:02d}_{safe_title}.md")
+    block_file = os.path.join(file_dir, f"block_{idx:02d}_{safe_title}_{md_file_name}.md")
 
+    """处理参考文献章节"""
     # 检查是否为参考文献章节
     is_references = False
     for block in section:
@@ -245,17 +228,16 @@ def TranslateProcess(section, idx, file_dir, max_translation=1000, model: LLM_mo
 
     if is_references:
         # 使用专门的参考文献处理函数
-        translate_references(section, block_file)
+        # translate_references(section, block_file)
+        # return block_file
+        # 不翻译，直接写入
+        with open(block_file, 'w', encoding='utf-8') as f:
+            for block in section:
+                f.write(block[1] + '\n')
         return block_file
 
-    # 准备API请求头
-    headers = {
-        "Authorization": f"Bearer {model.api_key}",
-        "Content-Type": "application/json",
-        "api-key": model.api_key,
-    }
-
-    # 初始化对话历史，给出示例对话
+    # 初始化对话历史
+    # todo 保持对话历史不超过5轮
     conversation_history = [
         {"role": "system", "content": SYS_PROMPT},
         {"role": "user",
@@ -272,55 +254,29 @@ They ignore the complex structure of a trace brought by its invocation hierarchy
 
     def translate_text(text_to_translate):
         """执行实际的翻译请求"""
+        # 添加用户消息到对话历史
         conversation_history.append({"role": "user", "content": f"{text_to_translate}"})
 
-        data = {
-            "model": model.model_name,
-            "messages": conversation_history,
-            "stream": True,
-            "max_tokens": 4095,
-        }
+        # 调用新的LLM_Stream_Response函数
+        result = LLM_Stream_Response(
+            model=model,
+            messages=conversation_history,
+            write_file=block_file,
+            timeout=30,
+            max_tokens=4095
+        )
 
-        translated_content = ""  # 用于累积翻译的内容
-
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                with requests.post(model.post_url, headers=headers, json=data, stream=True, timeout=30) as response:
-                    response.raise_for_status()
-                    for line in response.iter_lines():
-                        if line:
-                            decoded_line = line.decode('utf-8')
-                            if decoded_line.startswith("data: "):
-                                decoded_line = decoded_line[len("data: "):]
-                                if decoded_line == "[DONE]":
-                                    break
-                                try:
-                                    json_data = json.loads(decoded_line)
-                                    if json_data.get('choices'):
-                                        delta = json_data['choices'][0]['delta']
-                                        if 'content' in delta:
-                                            content = delta['content']
-                                            translated_content += content  # 累积翻译内容
-                                            with open(block_file, 'a', encoding='utf-8') as f:
-                                                f.write(content)  # 实时写入文件
-                                except json.JSONDecodeError:
-                                    continue
-                # 成功翻译后，跳出重试循环
-                break
-
-            except Exception as e:
-                print(f"翻译出错: {str(e)}, 尝试重试 ({attempt + 1}/{max_retries + 1})")
-                if attempt < max_retries:
-                    time.sleep(random.uniform(3, 10))  # 随机等待3-10秒
-                else:
-                    # 所有重试都失败后，写入原文并追加错误信息
-                    with open(block_file, 'a', encoding='utf-8') as f:
-                        f.write(text_to_translate)
-                        f.write(f"\n[翻译出错: {str(e)}]\n")
-                        # 移除此次失败的对话记录
-                        conversation_history.pop()
-                    return
+        # 处理响应
+        if result is None:
+            # 所有重试都失败，写入原文
+            with open(block_file, 'a', encoding='utf-8') as f:
+                f.write(text_to_translate)
+                f.write(f"\n[翻译出错，使用原文]\n")
+            # 移除失败的用户消息
+            conversation_history.pop()
+            return
+        # 解析翻译结果
+        translated_content, token_usage = result
 
         # 记录assistant的完整回复，用于下一次对话
         conversation_history.append({"role": "assistant", "content": translated_content})
@@ -339,11 +295,10 @@ They ignore the complex structure of a trace brought by its invocation hierarchy
                 translate_text(current_text)
                 current_text = ""
                 current_words = 0
-                # time.sleep(random.uniform(1, 3))
 
             # 直接写入非paragraph内容
             with open(block_file, 'a', encoding='utf-8') as f:
-                f.write('\n' + block_content + '\n')
+                f.write('\n' + block_content + '\n\n')
             continue
 
         # 处理paragraph类型
@@ -354,7 +309,6 @@ They ignore the complex structure of a trace brought by its invocation hierarchy
             translate_text(current_text)
             current_text = ""
             current_words = 0
-            # time.sleep(random.uniform(1, 3))
 
         # 累积内容
         current_text += block_content + '\n'
@@ -365,7 +319,6 @@ They ignore the complex structure of a trace brought by its invocation hierarchy
             translate_text(current_text)
             current_text = ""
             current_words = 0
-            # time.sleep(random.uniform(1, 3))
 
     # 翻译剩余内容
     if current_text:
@@ -393,40 +346,32 @@ def check_titles_consistency(orig_titles, translated_titles):
 
 def translate_titles(title_blocks, model: LLM_model):
     """翻译标题块"""
-    headers = {
-        "Authorization": f"Bearer {model.api_key}",
-        "Content-Type": "application/json",
-        "api-key": model.api_key,
-    }
-
     title_text = "\n".join(block[1] for block in title_blocks)
-    conversation_history = [
-        {"role": "system", "content": """你是专业的Markdown文档标题翻译器。
+
+    system_prompt = """你是专业的Markdown文档标题翻译器。
 请将给定的英文标题翻译成中文，注意：
 1. 保持原有的标题等级（#的数量）不变
 2. 保持原有的标题序号（如果有）不变
 3. 每个标题占一行
 4. 直接输出翻译结果，不要有任何解释
-"""},
-        {"role": "user", "content": f"翻译以下Markdown标题：\n{title_text}"}
-    ]
+"""
 
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            response = requests.post(
-                model.post_url,
-                headers=headers,
-                json={
-                    "model": model.model_name,
-                    "messages": conversation_history,
-                    "temperature": 0.3,  # 降低随机性
-                    # "max_tokens": 2000,
-                },
-                timeout=30
+            # 使用新的LLM_Stream_Response函数
+            result = LLM_Stream_Response(
+                model=model,
+                system_prompt=system_prompt,
+                prompt=f"翻译以下Markdown标题：\n{title_text}",
+                temperature=0.3
             )
-            response.raise_for_status()
-            translated_text = response.json()['choices'][0]['message']['content'].strip()
+
+            if result is None:
+                print(f"第{attempt + 1}次翻译标题失败，准备重试...")
+                continue
+
+            translated_text, _ = result
 
             # 解析翻译后的标题
             translated_titles = []
@@ -440,11 +385,11 @@ def translate_titles(title_blocks, model: LLM_model):
                 return translated_titles
 
             print(f"第{attempt + 1}次翻译的标题结构不符合要求，重试...")
-            # time.sleep(2)
 
         except Exception as e:
             print(f"翻译标题时出错: {str(e)}")
-            time.sleep(2)
+
+        time.sleep(2)
 
     print("翻译标题失败，将保持原标题不变")
     return title_blocks
@@ -453,13 +398,15 @@ def translate_titles(title_blocks, model: LLM_model):
 from tqdm.auto import tqdm
 
 
-def process_markdown_translation(md_file_path, max_translation=1000, max_concurrent=3, model: LLM_model = glm_4_plus):
+def process_markdown_translation(md_file_path, model: LLM_model, max_translation=1000, max_concurrent=3, ):
     """
     处理Markdown文件的翻译
     Args:
         md_file_path: Markdown文件路径
         max_concurrent: 最大并行数
     """
+    # 获取Markdown文件名（不含扩展名）
+    md_file_name = os.path.splitext(os.path.basename(md_file_path))[0]
 
     # 读取文件内容
     with open(md_file_path, 'r', encoding='utf-8') as file:
@@ -476,7 +423,7 @@ def process_markdown_translation(md_file_path, max_translation=1000, max_concurr
     if level1_count <= 1:
         print("检测到一级标题数量不足，正在调整标题层级...")
         # 调整标题层级，gemini做不来，只能用gpt-4
-        arrange_titles(md_file_path, model=gpt_4o_GitHub)
+        arrange_titles(md_file_path, model=model)
         with open(md_file_path, 'r', encoding='utf-8') as file:
             content = file.readlines()
         # 重新读取调整后的内容
@@ -510,8 +457,9 @@ def process_markdown_translation(md_file_path, max_translation=1000, max_concurr
                 section,
                 idx,
                 file_dir,
+                model,
                 max_translation,
-                model
+                md_file_name  # 传递Markdown文件名
             ): idx
             for idx, section in enumerate(sections)
         }
@@ -528,8 +476,9 @@ def process_markdown_translation(md_file_path, max_translation=1000, max_concurr
     # 按序号排序文件列表
     block_files.sort(key=lambda x: os.path.basename(x))
 
-    # 合并翻译结果
+    '''合并翻译结果'''
     base_name = os.path.splitext(os.path.basename(md_file_path))[0]
+    # 调整文件名
     if '_EN_' in base_name:
         base_name = base_name.replace('_EN_', '_CH_')
     output_file = os.path.join(file_dir, f"{base_name}_逐句对照.md")
@@ -568,7 +517,7 @@ def process_markdown_translation(md_file_path, max_translation=1000, max_concurr
     print(f"翻译完成，最终结果已保存至: {output_file}")
 
 
-def auto_batch_translation(input_dir, model=gemini_2_flash):
+def auto_batch_translation(input_dir, model):
     """
     自动批量翻译指定文件夹下的Markdown文件
     Args:
@@ -606,15 +555,49 @@ def auto_batch_translation(input_dir, model=gemini_2_flash):
 
 
 if __name__ == "__main__":
-    # todo 翻译完成后通过检查译文的英文与原文的相似度，减少LLM瞎编的情况
-    md_files = select_md_files()
-    total_files = len(md_files)
-    for i, md_file in enumerate(md_files):
-        print(f"\n[{i + 1}/{total_files}] 开始处理文件: {os.path.basename(md_file)}")
+    # 选择LLM模型
+    selected_llm: LLM_model = ChooseLLM(MyLLMs)
+    if selected_llm is None:
+        print("没有有效的LLM模型可供选择，程序退出。")
+        exit(1)
+    # 检查Mistral OCR API密钥
+    if not Mistral_OCR_API:
+        print("Mistral OCR API密钥未设置，将无法翻译PDF文件，请检查配置。")
+
+    files = select_md_or_pdf_files()
+    total_files = len(files)
+    for i, file_path in enumerate(files):
+        print(f"\n[{i + 1}/{total_files}] 开始处理文件: {os.path.basename(file_path)}")
         start_time = time.time()
-        process_markdown_translation(md_file, max_translation=800, max_concurrent=1, model=gemini_2_flash)
+
+        # 检查文件类型
+        if file_path.lower().endswith('.pdf'):
+            if not Mistral_OCR_API:
+                print("Mistral OCR API密钥未设置，将无法翻译PDF文件，请检查配置。")
+                continue
+            print(f"检测到PDF文件，正在使用Mistral OCR进行文本提取...")
+            try:
+                pdf2markdown(file_path, Mistral_OCR_API)
+                # 获取生成的Markdown文件路径
+                md_file_path = Path(file_path).with_suffix('.md')
+                if md_file_path.exists():
+                    print(f"PDF转Markdown成功，开始翻译处理...")
+                    process_markdown_translation(str(md_file_path), max_translation=800,
+                                                 max_concurrent=selected_llm.max_concurrent, model=selected_llm)
+                else:
+                    print(f"PDF转Markdown失败，未找到生成的Markdown文件")
+            except Exception as e:
+                print(f"PDF处理出错: {str(e)}")
+        elif file_path.lower().endswith('.md'):
+            # 直接处理Markdown文件
+            process_markdown_translation(file_path, max_translation=800, max_concurrent=selected_llm.max_concurrent,
+                                         model=selected_llm)
+        else:
+            print(f"不支持的文件类型: {file_path}")
+            continue
+
         elapsed_time = time.time() - start_time
-        print(f"[{i + 1}/{total_files}] 文件处理完成: {os.path.basename(md_file)}")
+        print(f"[{i + 1}/{total_files}] 文件处理完成: {os.path.basename(file_path)}")
         print(f"处理耗时: {elapsed_time:.2f}秒 ({elapsed_time / 60:.2f}分钟)")
         print(f"总体进度: {(i + 1) / total_files * 100:.1f}% 完成")
 

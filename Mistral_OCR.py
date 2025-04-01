@@ -44,7 +44,7 @@ def save_ocr_results(ocr_response: OCRResponse, pdf_path: str) -> None:
         f.write("\n\n".join(all_markdowns))
 
 
-def process_pdf(pdf_path: str, api_key: str) -> None:
+def pdf2markdown(pdf_path: str, api_key: str) -> None:
     # 初始化客户端
     client = Mistral(api_key=api_key)
 
@@ -79,4 +79,4 @@ if __name__ == "__main__":
     API_KEY = Mistral_OCR_API
     PDF_PATH = select_pdf()
 
-    process_pdf(PDF_PATH, API_KEY)
+    pdf2markdown(PDF_PATH, API_KEY)

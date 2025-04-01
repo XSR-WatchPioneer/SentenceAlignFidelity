@@ -4,10 +4,10 @@ import re
 from fuzzywuzzy import process
 
 import utils
-from LLM_API import LLM_model, glm_4_plus
+from LLM_API import LLM_model
 
 
-def arrange_titles(md_file_path, model: LLM_model = glm_4_plus, replace=True):
+def arrange_titles(md_file_path, model: LLM_model, replace=True):
     def replace_titles(no_number=False):
         # 读取markdown文件内容
         with open(md_file_path, 'r', encoding='utf-8') as file:
@@ -94,7 +94,7 @@ def arrange_titles(md_file_path, model: LLM_model = glm_4_plus, replace=True):
     replace_titles()
 
 
-def arrange_titles_interactive(md_file_path, model: LLM_model = glm_4_plus, replace=True):
+def arrange_titles_interactive(md_file_path, model: LLM_model, replace=True):
     def replace_titles(no_number=False):
         # 读取markdown文件内容
         with open(md_file_path, 'r', encoding='utf-8') as file:
