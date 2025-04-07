@@ -471,7 +471,7 @@ def process_markdown_translation(md_file_path, model: LLM_model, max_translation
 
     # 按序号排序文件列表
     block_files.sort(key=lambda x: os.path.basename(x))
-
+    # todo:不必等到所有翻译完成后再合并，逐个翻译逐个合并
     '''合并翻译结果'''
     base_name = os.path.splitext(os.path.basename(md_file_path))[0]
     # 调整文件名
@@ -551,6 +551,7 @@ def auto_batch_translation(input_dir, model):
 
 
 if __name__ == "__main__":
+    # todo:DeepSeek过于戏精，表现不够稳定，或许要调整Prompt
     # 选择LLM模型
     selected_llm: LLM_model = ChooseLLM(MyLLMs)
     if selected_llm is None:
