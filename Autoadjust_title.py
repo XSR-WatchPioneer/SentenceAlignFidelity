@@ -3,8 +3,7 @@ import re
 
 from fuzzywuzzy import process
 
-import utils
-from LLM_API import LLM_model
+from LLM_API import LLM_model, ChooseLLM, MyLLMs
 from LLM_tools import LLM_Stream_Response
 
 
@@ -78,11 +77,13 @@ def arrange_titles(md_file_path, model: LLM_model, replace=True):
         new_titles,token_usage = LLM_Stream_Response(
             model=model,
             prompt=f"""
-将以下Markdown标题重新调整级别，从1级算起，章节标题与文章标题同设为1级。
-注意：
-- 去掉标题中多余的空白，但不要改变标题内容
-- 如果标题有编号，保留编号不要删掉
-- 直接给出结果，不要输出多余内容
+请帮我整理以下混乱的Markdown标题层级结构，要求：
+- 将整个文档的标题层级重新调整为从1级(#)开始的规范结构
+- 文章主标题和章节标题都设为1级标题(即使用#)
+- 子章节按层级依次使用##、###等
+- 完全保留原有的标题编号（如果有）
+- 保持原有的标题文本内容不变，仅调整#的数量
+- 只输出整理后的Markdown内容，不要添加任何解释或说明
 """+"\n".join(old_titles),
         )
         new_titles = new_titles.split('\n')
@@ -103,3 +104,9 @@ def arrange_titles(md_file_path, model: LLM_model, replace=True):
         raise RuntimeError("重试3次后仍未生成合适的标题结构，程序终止")
 
     replace_titles()
+
+if __name__ == '__main__':
+    #测试
+    md_file_path = r"D:\Obsidian Vault\云容器\其余\2020_EN_一种微服务架构中检测工件异常的方法_md\2020_EN_一种微服务架构中检测工件异常的方法.md"
+    selected_llm = ChooseLLM(MyLLMs)
+    arrange_titles(md_file_path, selected_llm, replace=False)
