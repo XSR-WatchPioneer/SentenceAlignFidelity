@@ -5,12 +5,14 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from LLM_API import *
-from LLM_tools import LLM_Stream_Response
-from utils import split_markdown_into_blocks, merge_by_top_section, count_words, clean_filename, select_md_or_pdf_files
 from Autoadjust_title import arrange_titles
-from Mistral_OCR import pdf2markdown
+from LLM_API import *
 from LLM_API import ChooseLLM, Mistral_OCR_API
+from LLM_tools import LLM_Stream_Response
+from Mistral_OCR import pdf2markdown
+from utils import split_markdown_into_blocks, merge_by_top_section, count_words, clean_filename, select_md_or_pdf_files
+
+
 # from LLM_API_test import gemini_2_flash
 
 def recover_paragraph(translated_file_path, original_blocks):
@@ -236,7 +238,7 @@ def TranslateProcess(section, idx, file_dir, model: LLM_model, max_translation=1
         return block_file
 
     # 初始化对话历史
-    # todo 保持对话历史不超过5轮
+    # todo 保持对话历史不超过n轮
     conversation_history = [
         {"role": "system", "content": SYS_PROMPT},
         {"role": "user",
@@ -296,7 +298,7 @@ They ignore the complex structure of a trace brought by its invocation hierarchy
 
             # 直接写入非paragraph内容
             with open(block_file, 'a', encoding='utf-8') as f:
-                f.write('\n' + block_content + '\n\n')
+                f.write('\n\n' + block_content + '\n\n')
             continue
 
         # 处理paragraph类型
@@ -394,7 +396,7 @@ def translate_titles(title_blocks, model: LLM_model):
 from tqdm.auto import tqdm
 
 
-def process_markdown_translation(md_file_path, model: LLM_model, max_translation=1000, max_concurrent=3, ):
+def process_markdown_translation(md_file_path, model: LLM_model, max_translation=1000, max_concurrent=3,remove_block_files=False ):
     """
     处理Markdown文件的翻译
     Args:
@@ -508,7 +510,8 @@ def process_markdown_translation(md_file_path, model: LLM_model, max_translation
                 outfile.write(infile.read())
                 outfile.write('\n')
             # 删除临时块文件
-            # os.remove(block_file)
+            if remove_block_files:
+                os.remove(block_file)
 
     print(f"翻译完成，最终结果已保存至: {output_file}")
 
@@ -549,20 +552,20 @@ def auto_batch_translation(input_dir, model):
     print(f"\n翻译完成，共处理 {total_processed}/{len(target_files)} 个文件")
     return total_processed
 
-
-if __name__ == "__main__":
-    # todo:DeepSeek过于戏精，表现不够稳定，或许要调整Prompt
+def translation_GUI(remove_block_files=False):
     # 选择LLM模型
     selected_llm: LLM_model = ChooseLLM(MyLLMs)
     if selected_llm is None:
         print("没有有效的LLM模型可供选择，程序退出。")
         exit(1)
+
     # 检查Mistral OCR API密钥
     if not Mistral_OCR_API:
         print("Mistral OCR API密钥未设置，将无法翻译PDF文件，请检查配置。")
 
     files = select_md_or_pdf_files()
     total_files = len(files)
+    md_file_to_translate=""
     for i, file_path in enumerate(files):
         print(f"\n[{i + 1}/{total_files}] 开始处理文件: {os.path.basename(file_path)}")
         start_time = time.time()
@@ -579,24 +582,34 @@ if __name__ == "__main__":
                 md_file_path = Path(file_path).with_suffix('.md')
                 if md_file_path.exists():
                     print(f"PDF转Markdown成功，开始翻译处理...")
-                    process_markdown_translation(str(md_file_path), max_translation=800,
-                                                 max_concurrent=selected_llm.max_concurrent, model=selected_llm)
+                    md_file_to_translate = str(md_file_path)
                 else:
                     print(f"PDF转Markdown失败，未找到生成的Markdown文件")
             except Exception as e:
                 print(f"PDF处理出错: {str(e)}")
         elif file_path.lower().endswith('.md'):
             # 直接处理Markdown文件
-            process_markdown_translation(file_path, max_translation=800, max_concurrent=selected_llm.max_concurrent,
-                                         model=selected_llm)
+            md_file_to_translate=file_path
         else:
             print(f"不支持的文件类型: {file_path}")
+            continue
+        #执行翻译
+        try:
+            process_markdown_translation(md_file_to_translate, max_translation=800,
+                                         max_concurrent=selected_llm.max_concurrent, model=selected_llm,
+                                         remove_block_files=remove_block_files)
+        except Exception as e:
+            print(f"处理文件 {file_path} 时出错: {str(e)}")
             continue
 
         elapsed_time = time.time() - start_time
         print(f"[{i + 1}/{total_files}] 文件处理完成: {os.path.basename(file_path)}")
         print(f"处理耗时: {elapsed_time:.2f}秒 ({elapsed_time / 60:.2f}分钟)")
         print(f"总体进度: {(i + 1) / total_files * 100:.1f}% 完成")
+
+if __name__ == "__main__":
+    # todo:DeepSeek过于戏精，表现不够稳定，或许要调整Prompt
+    translation_GUI(remove_block_files=True)
 
     # auto_batch_translation(input_dir=r"C:\Users\XSR_Main\Documents\Obsidian Vault\云容器", model=gemini_2_flash)
 
